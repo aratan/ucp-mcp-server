@@ -30,10 +30,10 @@ def pytest_collection_modifyitems(config, items):
 # Sample UCP discovery response (based on flower shop example)
 SAMPLE_DISCOVERY_RESPONSE = {
     "ucp": {
-        "version": "2026-01-11",
+        "version": "2026-04-08",
         "services": {
             "dev.ucp.shopping": {
-                "version": "2026-01-11",
+                "version": "2026-04-08",
                 "spec": "https://ucp.dev/specs/shopping",
                 "rest": {
                     "schema": "https://ucp.dev/services/shopping/openapi.json",
@@ -41,57 +41,40 @@ SAMPLE_DISCOVERY_RESPONSE = {
                 },
             }
         },
-        "capabilities": [
-            {
-                "name": "dev.ucp.shopping.checkout",
-                "version": "2026-01-11",
-                "spec": "https://ucp.dev/specs/shopping/checkout",
-                "schema": "https://ucp.dev/schemas/shopping/checkout.json",
-            },
-            {
-                "name": "dev.ucp.shopping.discount",
-                "version": "2026-01-11",
-                "spec": "https://ucp.dev/specs/shopping/discount",
-                "schema": "https://ucp.dev/schemas/shopping/discount.json",
-                "extends": "dev.ucp.shopping.checkout",
-            },
-            {
-                "name": "dev.ucp.shopping.fulfillment",
-                "version": "2026-01-11",
-                "spec": "https://ucp.dev/specs/shopping/fulfillment",
-                "schema": "https://ucp.dev/schemas/shopping/fulfillment.json",
-                "extends": "dev.ucp.shopping.checkout",
-            },
-        ],
-    },
-    "payment": {
-        "handlers": [
-            {
-                "id": "shop_pay",
-                "name": "com.shopify.shop_pay",
-                "version": "2026-01-11",
-                "spec": "https://shopify.dev/ucp/handlers/shop_pay",
-                "config_schema": "https://shopify.dev/ucp/handlers/shop_pay/config.json",
-                "instrument_schemas": [
-                    "https://shopify.dev/ucp/handlers/shop_pay/instrument.json"
-                ],
-                "config": {"shop_id": "d124d01c-3386-4c58-bc58-671b705e19ff"},
-            },
-            {
-                "id": "google_pay",
-                "name": "google.pay",
-                "version": "2026-01-11",
-                "spec": "https://example.com/spec",
-                "config_schema": "https://example.com/schema",
-                "instrument_schemas": [
-                    "https://ucp.dev/schemas/shopping/types/gpay_card_payment_instrument.json"
-                ],
-                "config": {
-                    "api_version": 2,
-                    "merchant_info": {"merchant_name": "Flower Shop"},
-                },
-            },
-        ]
+        "capabilities": {
+            "dev.ucp.shopping.checkout": [
+                {"version": "2026-04-08", "spec": "https://ucp.dev/specs/shopping/checkout"}
+            ],
+            "dev.ucp.shopping.discount": [
+                {"version": "2026-04-08", "spec": "https://ucp.dev/specs/shopping/discount"}
+            ],
+            "dev.ucp.shopping.fulfillment": [
+                {"version": "2026-04-08", "spec": "https://ucp.dev/specs/shopping/fulfillment"}
+            ],
+        },
+        "payment_handlers": {
+            "shop_pay": [
+                {
+                    "id": "shop_pay",
+                    "name": "com.shopify.shop_pay",
+                    "version": "2026-04-08",
+                    "spec": "https://shopify.dev/ucp/handlers/shop_pay",
+                    "config": {"shop_id": "d124d01c-3386-4c58-bc58-671b705e19ff"},
+                }
+            ],
+            "google_pay": [
+                {
+                    "id": "google_pay",
+                    "name": "com.google.pay",
+                    "version": "2026-04-08",
+                    "spec": "https://example.com/spec",
+                    "config": {
+                        "api_version": 2,
+                        "merchant_info": {"merchant_name": "Flower Shop"},
+                    },
+                }
+            ],
+        },
     },
 }
 

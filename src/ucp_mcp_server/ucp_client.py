@@ -58,12 +58,36 @@ class UCPClient:
 
         # Parse the UCP response
         ucp_data = data.get("ucp", {})
-        payment_data = data.get("payment", {})
 
-        capabilities = [
-            UCPCapability(**cap) for cap in ucp_data.get("capabilities", [])
-        ]
-        handlers = [PaymentHandler(**h) for h in payment_data.get("handlers", [])]
+        # The server returns capabilities as a dict of {name: [version_objects]}.
+        # Flatten to a list of UCPCapability objects, one per version entry.
+        capabilities = []
+        for cap_name, cap_versions in ucp_data.get("capabilities", {}).items():
+            for ver in cap_versions:
+                capabilities.append(
+                    UCPCapability(
+                        name=cap_name,
+                        version=ver.get("version", "unknown"),
+                        spec=ver.get("spec"),
+                    )
+                )
+
+        # Payment handlers live under ucp.payment_handlers, not payment.handlers.
+        # Same dict-of-lists format.
+        handlers = []
+        for handler_name, handler_versions in ucp_data.get(
+            "payment_handlers", {}
+        ).items():
+            for ver in handler_versions:
+                handlers.append(
+                    PaymentHandler(
+                        id=ver.get("id", handler_name),
+                        name=ver.get("name", handler_name),
+                        version=ver.get("version", "unknown"),
+                        spec=ver.get("spec"),
+                        config=ver.get("config", {}),
+                    )
+                )
 
         return UCPDiscoveryResponse(
             version=ucp_data.get("version", "unknown"),
@@ -142,24 +166,25 @@ class UCPClient:
         url = f"{merchant_url.rstrip('/')}/checkout-sessions/{checkout_id}/complete"
 
         payload = {
-            "payment_data": {
-                "id": f"instr_{uuid.uuid4().hex[:8]}",
-                "handler_id": payment_handler_id,
-                "handler_name": payment_handler_id,
-                "type": "card",
-                "brand": card_brand,
-                "last_digits": card_last_digits,
-                "credential": {
-                    "type": "token",
-                    "token": card_token,
-                },
-                "billing_address": {
-                    "street_address": "123 Main St",
-                    "address_locality": "Anytown",
-                    "address_region": "CA",
-                    "address_country": "US",
-                    "postal_code": "12345",
-                },
+            "payment": {
+                "instruments": [
+                    {
+                        "id": f"instr_{uuid.uuid4().hex[:8]}",
+                        "handler_id": payment_handler_id,
+                        "type": "card",
+                        "credential": {
+                            "type": "token",
+                            "token": card_token,
+                        },
+                        "billing_address": {
+                            "street_address": "123 Main St",
+                            "address_locality": "Anytown",
+                            "address_region": "CA",
+                            "address_country": "US",
+                            "postal_code": "12345",
+                        },
+                    }
+                ],
             },
             "risk_signals": {
                 "ip": "127.0.0.1",
@@ -254,6 +279,9 @@ class UCPClient:
         # Get current checkout state
         current = await self.get_checkout(merchant_url, checkout_id)
 
+        # Extract line item IDs from the current checkout
+        line_item_ids = [li.get("id") or li.get("item", {}).get("id") for li in current.get("line_items", [])]
+
         base_payload = {
             "id": checkout_id,
             "line_items": current["line_items"],
@@ -261,8 +289,10 @@ class UCPClient:
             "payment": current["payment"],
         }
 
+        method_id = str(uuid.uuid4())
+
         # Step 1: Trigger fulfillment generation
-        payload = {**base_payload, "fulfillment": {"methods": [{"type": "shipping"}]}}
+        payload = {**base_payload, "fulfillment": {"methods": [{"id": method_id, "type": "shipping", "line_item_ids": line_item_ids}]}}
         data = await self.raw_update_checkout(merchant_url, checkout_id, payload)
 
         # Step 2: Select first destination
@@ -272,6 +302,7 @@ class UCPClient:
             return data
 
         method = methods[0]
+        method_id = method.get("id", method_id)
         destinations = method.get("destinations", [])
         if not destinations:
             return data
@@ -282,7 +313,7 @@ class UCPClient:
             "line_items": data["line_items"],
             "payment": data["payment"],
             "fulfillment": {
-                "methods": [{"type": "shipping", "selected_destination_id": dest_id}]
+                "methods": [{"id": method_id, "type": "shipping", "line_item_ids": line_item_ids, "selected_destination_id": dest_id}]
             },
         }
         data = await self.raw_update_checkout(merchant_url, checkout_id, payload)
@@ -299,6 +330,7 @@ class UCPClient:
             return data
 
         option_id = groups[0]["options"][0]["id"]
+        group_id = groups[0].get("id", f"group_{uuid.uuid4()}")
         payload = {
             **base_payload,
             "line_items": data["line_items"],
@@ -306,9 +338,11 @@ class UCPClient:
             "fulfillment": {
                 "methods": [
                     {
+                        "id": method_id,
                         "type": "shipping",
+                        "line_item_ids": line_item_ids,
                         "selected_destination_id": dest_id,
-                        "groups": [{"selected_option_id": option_id}],
+                        "groups": [{"id": group_id, "line_item_ids": line_item_ids, "selected_option_id": option_id}],
                     }
                 ]
             },
