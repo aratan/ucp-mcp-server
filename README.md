@@ -227,15 +227,224 @@ ucp-mcp-server/
     └── test_integration.py # Live server integration tests
 ```
 
+## Architecture
+
+### System Overview
+
+```mermaid
+flowchart LR
+    subgraph AI["AI Assistant"]
+        A1[Claude / Cursor / MCP Client]
+    end
+
+    subgraph MCP["MCP Server Layer"]
+        B1[FastMCP Server]
+        B2[ucp_discover]
+        B3[ucp_checkout_create]
+        B4[ucp_checkout_update]
+        B5[ucp_checkout_set_fulfillment]
+        B6[ucp_checkout_complete]
+    end
+
+    subgraph Client["HTTP Client Layer"]
+        C1[UCPClient]
+        C2[httpx AsyncClient]
+    end
+
+    subgraph Models["Data Models (Pydantic)"]
+        D1[UCPDiscoveryResponse]
+        D2[CheckoutSession]
+        D3[LineItem]
+        D4[PaymentHandler]
+    end
+
+    subgraph External["UCP Merchant API"]
+        E1[/.well-known/ucp]
+        E2[/checkout-sessions]
+        E3[/checkout-sessions/:id/complete]
+    end
+
+    A1 -->|"MCP Protocol (stdio)"| B1
+    B1 --> B2 & B3 & B4 & B5 & B6
+    B2 & B3 & B4 & B5 & B6 --> C1
+    C1 --> C2
+    C2 -->|"HTTPS"| E1 & E2 & E3
+    C1 --> D1 & D2 & D3 & D4
+```
+
+| Layer | Package | Purpose |
+|-------|---------|---------|
+| **AI Assistant** | External | MCP-compatible client (Claude, Cursor, etc.) |
+| **MCP Server** | `server.py` | Tool definitions, input/output transformation |
+| **HTTP Client** | `ucp_client.py` | Async HTTP calls to UCP merchant APIs |
+| **Data Models** | `models.py` | Pydantic validation for requests/responses |
+| **UCP Merchant** | External | Google UCP-compliant commerce server |
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class FastMCP {
+        +tool() decorator
+        +run(transport)
+    }
+
+    class UCPClient {
+        -timeout: float
+        -_client: AsyncClient
+        +__aenter__()
+        +__aexit__()
+        +discover(merchant_url) UCPDiscoveryResponse
+        +create_checkout(...) CheckoutSession
+        +update_checkout(...) CheckoutSession
+        +setup_fulfillment(...) dict
+        +complete_checkout(...) CheckoutSession
+        +get_checkout(...) dict
+        +raw_update_checkout(...) dict
+    }
+
+    class UCPClientError {
+        +message: str
+    }
+
+    class UCPDiscoveryResponse {
+        +ucp_version: str
+        +capabilities: list~UCPCapability~
+        +payment_handlers: list~PaymentHandler~
+    }
+
+    class UCPCapability {
+        +name: str
+        +version: str
+        +spec: str
+    }
+
+    class PaymentHandler {
+        +id: str
+        +name: str
+        +version: str
+        +config: dict
+    }
+
+    class CheckoutSession {
+        +id: str
+        +status: str
+        +currency: str
+        +line_items: list~LineItem~
+        +totals: list~CheckoutTotals~
+        +discounts: dict
+        +order: OrderInfo
+        +total: int
+        +subtotal: int
+        +discount_amount: int
+    }
+
+    class LineItem {
+        +id: str
+        +item: dict
+        +quantity: int
+        +totals: list
+    }
+
+    class CheckoutTotals {
+        +type: str
+        +amount: int
+    }
+
+    class DiscountApplied {
+        +code: str
+        +title: str
+        +amount: int
+        +automatic: bool
+    }
+
+    class OrderInfo {
+        +id: str
+        +permalink_url: str
+    }
+
+    FastMCP --> UCPClient : uses
+    UCPClient --> UCPDiscoveryResponse : returns
+    UCPClient --> CheckoutSession : returns
+    UCPClient --> UCPClientError : throws
+    UCPDiscoveryResponse *-- UCPCapability : contains
+    UCPDiscoveryResponse *-- PaymentHandler : contains
+    CheckoutSession *-- LineItem : contains
+    CheckoutSession *-- CheckoutTotals : contains
+    CheckoutSession *-- OrderInfo : contains
+    LineItem --> CheckoutTotals : has
+```
+
+### Shopping Flow (Sequence)
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant AI as AI Assistant
+    participant MCP as MCP Server
+    participant Client as UCPClient
+    participant Merchant as UCP Merchant
+
+    User->>AI: "Buy 2 roses from flower shop"
+    
+    AI->>MCP: ucp_discover(merchant_url)
+    MCP->>Client: discover()
+    Client->>Merchant: GET /.well-known/ucp
+    Merchant-->>Client: capabilities, handlers
+    Client-->>MCP: UCPDiscoveryResponse
+    MCP-->>AI: capabilities + payment_handlers
+    AI-->>User: "Merchant supports checkout, Shop Pay"
+
+    AI->>MCP: ucp_checkout_create(items, buyer)
+    MCP->>Client: create_checkout()
+    Client->>Merchant: POST /checkout-sessions
+    Merchant-->>Client: CheckoutSession
+    Client-->>MCP: CheckoutSession
+    MCP-->>AI: checkout_id, total
+    AI-->>User: "Cart ready: $35.00"
+
+    AI->>MCP: ucp_checkout_update(discount_codes=["10OFF"])
+    MCP->>Client: update_checkout()
+    Client->>Merchant: PUT /checkout-sessions/:id
+    Merchant-->>Client: CheckoutSession (updated)
+    Client-->>MCP: CheckoutSession
+    MCP-->>AI: total, discount_applied
+    AI-->>User: "Applied 10OFF: $31.50"
+
+    AI->>MCP: ucp_checkout_set_fulfillment()
+    MCP->>Client: setup_fulfillment()
+    Client->>Merchant: PUT /checkout-sessions/:id (3 steps)
+    Merchant-->>Client: CheckoutSession
+    Client-->>MCP: fulfillment details
+    MCP-->>AI: shipping selected
+    AI-->>User: "Shipping configured"
+
+    AI->>MCP: ucp_checkout_complete(payment)
+    MCP->>Client: complete_checkout()
+    Client->>Merchant: POST /checkout-sessions/:id/complete
+    Merchant-->>Client: Order confirmed
+    Client-->>MCP: OrderInfo
+    MCP-->>AI: order_id, order_url
+    AI-->>User: "Order placed! 🎉"
+```
+
 ## Roadmap
 
-- [x] Merchant capability discovery
-- [x] Checkout session creation
-- [x] Discount code application
-- [x] Fulfillment / shipping setup
-- [x] Purchase completion / payment submission
+### ✅ Completed
+
+- [x] Merchant capability discovery (`ucp_discover`)
+- [x] Checkout session creation (`ucp_checkout_create`)
+- [x] Discount code application (`ucp_checkout_update`)
+- [x] Fulfillment / shipping setup (`ucp_checkout_set_fulfillment`)
+- [x] Purchase completion / payment submission (`ucp_checkout_complete`)
+
+### 🚧 In Progress
+
 - [ ] Order fulfillment tracking
 - [ ] Returns and exchanges
+
+### 📋 Planned
+
 - [ ] Multi-merchant comparison shopping
 - [ ] Hosted managed version (so you don't have to self-host)
 
