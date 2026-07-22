@@ -1,0 +1,32 @@
+# SDD Configuration
+strict_tdd: true
+mode: hybrid
+
+project:
+  name: ucp-mcp-server
+  stack: python-3.10-hatch-pytest-ruff
+  path: /home/aratan/Proyectos/ucp-mcp-server
+
+phase_rules:
+  proposal: must be validated by architect before spec
+  spec: contains acceptance criteria and delta specs
+  design: architecture and implementation approach
+  tasks: implementation units to complete design
+  apply: actual code changes
+  verify: test execution proving correctness
+  archive: sync delta to openspec/changes/archive
+
+testing:
+  strict_tdd: true
+  runner: pytest
+  command: pytest -v
+  async_mode: auto (pytest-asyncio)
+  coverage_command: pytest --cov
+  layers:
+    unit: true
+    integration: "with respx mocks"
+    e2e: false
+  quality_tools:
+    linter: "ruff check ."
+    type_checker: "mypy (optional)"
+    formatter: "ruff format"
