@@ -171,6 +171,56 @@ SAMPLE_CHECKOUT_WITH_DISCOUNT = {
     },
 }
 
+# Sample order response
+SAMPLE_ORDER_RESPONSE = {
+    "ucp": {
+        "version": "2026-01-11",
+        "capabilities": [{"name": "dev.ucp.shopping.order", "version": "2026-01-11"}],
+    },
+    "id": "order-abc-123",
+    "status": "complete",
+    "currency": "USD",
+    "totals": [
+        {"type": "subtotal", "amount": 3500},
+        {"type": "total", "amount": 3500},
+    ],
+    "fulfillment": {
+        "methods": [
+            {
+                "id": "ship_123",
+                "type": "shipping",
+                "status": "unfulfilled",
+                "selected_option_id": "standard",
+            }
+        ]
+    },
+}
+
+# Sample shipped order response
+SAMPLE_ORDER_SHIPPED = {
+    "ucp": {
+        "version": "2026-01-11",
+        "capabilities": [{"name": "dev.ucp.shopping.order", "version": "2026-01-11"}],
+    },
+    "id": "order-abc-123",
+    "status": "complete",
+    "currency": "USD",
+    "totals": [
+        {"type": "subtotal", "amount": 3500},
+        {"type": "total", "amount": 3500},
+    ],
+    "fulfillment": {
+        "methods": [
+            {
+                "id": "ship_123",
+                "type": "shipping",
+                "status": "shipped",
+                "selected_option_id": "standard",
+            }
+        ]
+    },
+}
+
 # Sample completed checkout response
 SAMPLE_CHECKOUT_COMPLETED = {
     "ucp": {
@@ -240,6 +290,16 @@ def mock_ucp_server():
         respx_mock.post(
             url__regex=r"http://localhost:8182/checkout-sessions/.*/complete"
         ).mock(return_value=Response(200, json=SAMPLE_CHECKOUT_COMPLETED))
+
+        # Order endpoint
+        respx_mock.get(url__regex=r"http://localhost:8182/orders/.*").mock(
+            return_value=Response(200, json=SAMPLE_ORDER_RESPONSE)
+        )
+
+        # Simulate shipping endpoint
+        respx_mock.post(
+            url__regex=r"http://localhost:8182/testing/simulate-shipping/.*"
+        ).mock(return_value=Response(200, json={"status": "shipped"}))
 
         yield respx_mock
 

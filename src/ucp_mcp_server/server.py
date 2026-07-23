@@ -200,6 +200,73 @@ async def ucp_checkout_set_fulfillment(
 
 
 @mcp.tool()
+async def ucp_order_get(
+    merchant_url: str,
+    order_id: str,
+) -> dict[str, Any]:
+    """
+    Get the current status of an order, including fulfillment details.
+
+    Args:
+        merchant_url: The base URL of the UCP-enabled merchant
+        order_id: The ID of the order to track
+
+    Returns:
+        Dictionary containing:
+        - order_id: The order ID
+        - status: Current order status
+        - currency: Order currency
+        - total: Total amount charged
+        - fulfillment: Fulfillment details (method, tracking, status)
+    """
+    try:
+        async with UCPClient() as client:
+            data = await client.get_order(merchant_url=merchant_url, order_id=order_id)
+            return {
+                "order_id": data.get("id", order_id),
+                "status": data.get("status", "unknown"),
+                "currency": data.get("currency", "USD"),
+                "total": next(
+                    (
+                        t["amount"]
+                        for t in data.get("totals", [])
+                        if t["type"] == "total"
+                    ),
+                    0,
+                ),
+                "fulfillment": data.get("fulfillment", {}),
+            }
+    except UCPClientError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def ucp_testing_simulate_shipping(
+    merchant_url: str,
+    order_id: str,
+) -> dict[str, Any]:
+    """
+    Simulate shipping an order via the merchant's testing endpoint.
+
+    Args:
+        merchant_url: The base URL of the UCP-enabled merchant
+        order_id: The ID of the order to mark as shipped
+
+    Returns:
+        Dictionary containing:
+        - status: The result of the simulation (e.g., 'shipped')
+    """
+    try:
+        async with UCPClient() as client:
+            result = await client.simulate_shipping(
+                merchant_url=merchant_url, order_id=order_id
+            )
+            return result
+    except UCPClientError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def ucp_checkout_update(
     merchant_url: str,
     checkout_id: str,
