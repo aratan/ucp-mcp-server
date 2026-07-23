@@ -22,15 +22,27 @@ env/
 .DS_Store
 Thumbs.db
 
-# Testing
+# Testing / Development
 .pytest_cache/
+.ruff_cache/
 htmlcov/
 .coverage
-ollama.md
-llama.md
+.coverage.*
+coverage.xml
+
 # Environment
 .env
 .env.local
 
 # uv
 uv.lock
+
+# Development / SDD artifacts
+openspec/
+scripts/
+tests/
+.ucp-demo/
+.github/
+.atl/
+SDD-INITIALIZED.md
+OLLAMA.md

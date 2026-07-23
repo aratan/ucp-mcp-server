@@ -1,7 +1,6 @@
 """HTTP client for UCP API calls with rate limiting, retry, and structured logging."""
 
 import asyncio
-import logging
 import time
 import uuid
 from typing import Any
@@ -9,6 +8,16 @@ from typing import Any
 import httpx
 
 from .config import config
+from .logging import get_logger
+from .metrics import (
+    http_requests_total,
+    http_request_duration_seconds,
+    http_requests_in_progress,
+    http_retries_total,
+    discovery_cache_hits_total,
+    discovery_cache_misses_total,
+    MetricsMiddleware,
+)
 from .models import (
     CheckoutSession,
     PaymentHandler,
@@ -17,7 +26,7 @@ from .models import (
     UCPDiscoveryResponse,
 )
 
-logger = logging.getLogger("ucp_mcp_server")
+logger = get_logger("ucp_client")
 
 
 class UCPClientError(Exception):
@@ -45,7 +54,7 @@ class RateLimiter:
 
             if self._tokens < 1:
                 wait_time = (1 - self._tokens) / self._max_per_second
-                logger.debug(f"Rate limit: waiting {wait_time:.3f}s")
+                logger.debug("rate_limit_waiting", wait_time=wait_time)
                 await asyncio.sleep(wait_time)
                 self._tokens = 0
             else:
@@ -64,9 +73,11 @@ class DiscoveryCache:
         if merchant_url in self._cache:
             timestamp, data = self._cache[merchant_url]
             if time.time() - timestamp < self._ttl:
-                logger.debug(f"Discovery cache hit: {merchant_url}")
+                logger.debug("discovery_cache_hit", merchant_url=merchant_url)
+                discovery_cache_hits_total.inc()
                 return data
             del self._cache[merchant_url]
+        discovery_cache_misses_total.inc()
         return None
 
     def set(self, merchant_url: str, data: Any) -> None:
@@ -119,13 +130,25 @@ class UCPClient:
     ) -> httpx.Response:
         """Execute HTTP request with retry and exponential backoff."""
         last_error = None
+        # Extract endpoint name for metrics (simplify URL)
+        endpoint = url.split("//")[-1].split("/")[0] if "//" in url else url
 
         for attempt in range(self.max_retries + 1):
             await _rate_limiter.acquire()
 
             try:
                 client = self._get_client()
-                response = await client.request(method, url, **kwargs)
+                http_requests_in_progress.labels(method=method).inc()
+
+                with http_request_duration_seconds.labels(method=method, endpoint=endpoint).time():
+                    response = await client.request(method, url, **kwargs)
+
+                http_requests_in_progress.labels(method=method).dec()
+                http_requests_total.labels(
+                    method=method,
+                    endpoint=endpoint,
+                    status_code=str(response.status_code),
+                ).inc()
 
                 # Don't retry on 4xx errors (client errors)
                 if 400 <= response.status_code < 500:
@@ -142,19 +165,36 @@ class UCPClient:
                 return response
 
             except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
+                http_requests_in_progress.labels(method=method).dec()
                 last_error = e
                 if attempt < self.max_retries:
                     backoff = min(
                         config.RETRY_BACKOFF_BASE * (2 ** attempt),
                         config.RETRY_BACKOFF_MAX,
                     )
+                    http_retries_total.labels(
+                        method=method,
+                        endpoint=endpoint,
+                        attempt=str(attempt + 1),
+                    ).inc()
                     logger.warning(
-                        f"Request failed (attempt {attempt + 1}/{self.max_retries + 1}), "
-                        f"retrying in {backoff:.1f}s: {e}"
+                        "request_failed_retrying",
+                        method=method,
+                        url=url,
+                        attempt=attempt + 1,
+                        max_retries=self.max_retries + 1,
+                        backoff=backoff,
+                        error=str(e),
                     )
                     await asyncio.sleep(backoff)
                 else:
-                    logger.error(f"Request failed after {self.max_retries + 1} attempts: {e}")
+                    logger.error(
+                        "request_failed_max_retries",
+                        method=method,
+                        url=url,
+                        attempts=self.max_retries + 1,
+                        error=str(e),
+                    )
 
         raise last_error
 

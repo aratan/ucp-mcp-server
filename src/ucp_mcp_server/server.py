@@ -1,10 +1,18 @@
 """MCP Server exposing UCP shopping capabilities as tools."""
 
+import time
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from .logging import setup_logging, get_logger
+from .metrics import init_metrics, tool_calls_total, tool_call_duration_seconds
 from .ucp_client import UCPClient, UCPClientError
+
+# Initialize logging and metrics
+setup_logging()
+logger = get_logger("server")
+init_metrics(version="0.2.0")
 
 # Initialize FastMCP server
 mcp = FastMCP("ucp-shopping")
@@ -22,9 +30,13 @@ async def ucp_products_list(merchant_url: str) -> dict[str, Any]:
         Dictionary containing:
         - products: List of products with id, title, price, and image_url
     """
+    start_time = time.time()
     try:
         async with UCPClient() as client:
             result = await client.list_products(merchant_url)
+            tool_calls_total.labels(tool_name="ucp_products_list", status="success").inc()
+            tool_call_duration_seconds.labels(tool_name="ucp_products_list").observe(time.time() - start_time)
+            logger.info("tool_completed", tool="ucp_products_list", merchant_url=merchant_url)
             return {
                 "products": [
                     {
@@ -37,6 +49,9 @@ async def ucp_products_list(merchant_url: str) -> dict[str, Any]:
                 ]
             }
     except UCPClientError as e:
+        tool_calls_total.labels(tool_name="ucp_products_list", status="error").inc()
+        tool_call_duration_seconds.labels(tool_name="ucp_products_list").observe(time.time() - start_time)
+        logger.error("tool_failed", tool="ucp_products_list", error=str(e))
         return {"error": str(e)}
 
 
@@ -155,6 +170,9 @@ async def ucp_products_search(
                 "filters_applied": filters_applied,
             }
     except UCPClientError as e:
+        tool_calls_total.labels(tool_name="ucp_products_search", status="error").inc()
+        tool_call_duration_seconds.labels(tool_name="ucp_products_search").observe(time.time() - start_time)
+        logger.error("tool_failed", tool="ucp_products_search", error=str(e))
         return {"error": str(e)}
 
 
@@ -172,9 +190,13 @@ async def ucp_discover(merchant_url: str) -> dict[str, Any]:
         - payment_handlers: List of payment methods accepted
         - ucp_version: The UCP protocol version
     """
+    start_time = time.time()
     try:
         async with UCPClient() as client:
             result = await client.discover(merchant_url)
+            tool_calls_total.labels(tool_name="ucp_discover", status="success").inc()
+            tool_call_duration_seconds.labels(tool_name="ucp_discover").observe(time.time() - start_time)
+            logger.info("tool_completed", tool="ucp_discover", merchant_url=merchant_url)
             return {
                 "ucp_version": result.ucp_version,
                 "capabilities": [
@@ -195,6 +217,9 @@ async def ucp_discover(merchant_url: str) -> dict[str, Any]:
                 ],
             }
     except UCPClientError as e:
+        tool_calls_total.labels(tool_name="ucp_discover", status="error").inc()
+        tool_call_duration_seconds.labels(tool_name="ucp_discover").observe(time.time() - start_time)
+        logger.error("tool_failed", tool="ucp_discover", error=str(e))
         return {"error": str(e)}
 
 
@@ -223,6 +248,7 @@ async def ucp_checkout_create(
         - total: Total amount in smallest currency unit (e.g., cents)
         - line_items: List of items in the cart
     """
+    start_time = time.time()
     try:
         async with UCPClient() as client:
             result = await client.create_checkout(
@@ -231,6 +257,9 @@ async def ucp_checkout_create(
                 buyer={"name": buyer_name, "email": buyer_email},
                 currency=currency,
             )
+            tool_calls_total.labels(tool_name="ucp_checkout_create", status="success").inc()
+            tool_call_duration_seconds.labels(tool_name="ucp_checkout_create").observe(time.time() - start_time)
+            logger.info("tool_completed", tool="ucp_checkout_create", merchant_url=merchant_url)
             return {
                 "checkout_id": result.id,
                 "status": result.status,
@@ -247,6 +276,9 @@ async def ucp_checkout_create(
                 ],
             }
     except UCPClientError as e:
+        tool_calls_total.labels(tool_name="ucp_checkout_create", status="error").inc()
+        tool_call_duration_seconds.labels(tool_name="ucp_checkout_create").observe(time.time() - start_time)
+        logger.error("tool_failed", tool="ucp_checkout_create", error=str(e))
         return {"error": str(e)}
 
 
@@ -278,6 +310,7 @@ async def ucp_checkout_complete(
         - order_id: The order ID for tracking
         - order_url: Permalink to the order
     """
+    start_time = time.time()
     try:
         async with UCPClient() as client:
             result = await client.complete_checkout(
@@ -288,6 +321,9 @@ async def ucp_checkout_complete(
                 card_brand=card_brand,
                 card_last_digits=card_last_digits,
             )
+            tool_calls_total.labels(tool_name="ucp_checkout_complete", status="success").inc()
+            tool_call_duration_seconds.labels(tool_name="ucp_checkout_complete").observe(time.time() - start_time)
+            logger.info("tool_completed", tool="ucp_checkout_complete", merchant_url=merchant_url)
             response = {
                 "checkout_id": result.id,
                 "status": result.status,
@@ -299,6 +335,9 @@ async def ucp_checkout_complete(
                 response["order_url"] = result.order.permalink_url
             return response
     except UCPClientError as e:
+        tool_calls_total.labels(tool_name="ucp_checkout_complete", status="error").inc()
+        tool_call_duration_seconds.labels(tool_name="ucp_checkout_complete").observe(time.time() - start_time)
+        logger.error("tool_failed", tool="ucp_checkout_complete", error=str(e))
         return {"error": str(e)}
 
 
@@ -323,12 +362,16 @@ async def ucp_checkout_set_fulfillment(
         - total: Updated total (may include shipping costs)
         - fulfillment: Details of selected shipping method
     """
+    start_time = time.time()
     try:
         async with UCPClient() as client:
             data = await client.setup_fulfillment(
                 merchant_url=merchant_url,
                 checkout_id=checkout_id,
             )
+            tool_calls_total.labels(tool_name="ucp_checkout_set_fulfillment", status="success").inc()
+            tool_call_duration_seconds.labels(tool_name="ucp_checkout_set_fulfillment").observe(time.time() - start_time)
+            logger.info("tool_completed", tool="ucp_checkout_set_fulfillment", merchant_url=merchant_url)
             return {
                 "checkout_id": data["id"],
                 "status": data["status"],
@@ -344,6 +387,9 @@ async def ucp_checkout_set_fulfillment(
                 "fulfillment": data.get("fulfillment"),
             }
     except UCPClientError as e:
+        tool_calls_total.labels(tool_name="ucp_checkout_set_fulfillment", status="error").inc()
+        tool_call_duration_seconds.labels(tool_name="ucp_checkout_set_fulfillment").observe(time.time() - start_time)
+        logger.error("tool_failed", tool="ucp_checkout_set_fulfillment", error=str(e))
         return {"error": str(e)}
 
 
@@ -367,9 +413,13 @@ async def ucp_order_get(
         - total: Total amount charged
         - fulfillment: Fulfillment details (method, tracking, status)
     """
+    start_time = time.time()
     try:
         async with UCPClient() as client:
             data = await client.get_order(merchant_url=merchant_url, order_id=order_id)
+            tool_calls_total.labels(tool_name="ucp_order_get", status="success").inc()
+            tool_call_duration_seconds.labels(tool_name="ucp_order_get").observe(time.time() - start_time)
+            logger.info("tool_completed", tool="ucp_order_get", merchant_url=merchant_url)
             return {
                 "order_id": data.get("id", order_id),
                 "status": data.get("status", "unknown"),
@@ -385,6 +435,9 @@ async def ucp_order_get(
                 "fulfillment": data.get("fulfillment", {}),
             }
     except UCPClientError as e:
+        tool_calls_total.labels(tool_name="ucp_order_get", status="error").inc()
+        tool_call_duration_seconds.labels(tool_name="ucp_order_get").observe(time.time() - start_time)
+        logger.error("tool_failed", tool="ucp_order_get", error=str(e))
         return {"error": str(e)}
 
 
@@ -404,13 +457,20 @@ async def ucp_testing_simulate_shipping(
         Dictionary containing:
         - status: The result of the simulation (e.g., 'shipped')
     """
+    start_time = time.time()
     try:
         async with UCPClient() as client:
             result = await client.simulate_shipping(
                 merchant_url=merchant_url, order_id=order_id
             )
+            tool_calls_total.labels(tool_name="ucp_testing_simulate_shipping", status="success").inc()
+            tool_call_duration_seconds.labels(tool_name="ucp_testing_simulate_shipping").observe(time.time() - start_time)
+            logger.info("tool_completed", tool="ucp_testing_simulate_shipping", merchant_url=merchant_url)
             return result
     except UCPClientError as e:
+        tool_calls_total.labels(tool_name="ucp_testing_simulate_shipping", status="error").inc()
+        tool_call_duration_seconds.labels(tool_name="ucp_testing_simulate_shipping").observe(time.time() - start_time)
+        logger.error("tool_failed", tool="ucp_testing_simulate_shipping", error=str(e))
         return {"error": str(e)}
 
 
@@ -436,6 +496,7 @@ async def ucp_checkout_update(
         - discount_applied: Amount discounted
         - discounts: Details of applied discounts
     """
+    start_time = time.time()
     try:
         async with UCPClient() as client:
             result = await client.update_checkout(
@@ -443,6 +504,9 @@ async def ucp_checkout_update(
                 checkout_id=checkout_id,
                 discount_codes=discount_codes,
             )
+            tool_calls_total.labels(tool_name="ucp_checkout_update", status="success").inc()
+            tool_call_duration_seconds.labels(tool_name="ucp_checkout_update").observe(time.time() - start_time)
+            logger.info("tool_completed", tool="ucp_checkout_update", merchant_url=merchant_url)
             return {
                 "checkout_id": result.id,
                 "status": result.status,
@@ -453,6 +517,9 @@ async def ucp_checkout_update(
                 "discounts": result.discounts,
             }
     except UCPClientError as e:
+        tool_calls_total.labels(tool_name="ucp_checkout_update", status="error").inc()
+        tool_call_duration_seconds.labels(tool_name="ucp_checkout_update").observe(time.time() - start_time)
+        logger.error("tool_failed", tool="ucp_checkout_update", error=str(e))
         return {"error": str(e)}
 
 
