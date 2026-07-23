@@ -30,3 +30,4 @@ jobs:
       - name: Run end-to-end scenarios
         timeout-minutes: 7
         run: uv run python scripts/test_mcp_scenarios.py
+# Trigger E2E PR workflow

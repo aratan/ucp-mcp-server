@@ -171,6 +171,56 @@ SAMPLE_CHECKOUT_WITH_DISCOUNT = {
     },
 }
 
+# Sample order response
+SAMPLE_ORDER_RESPONSE = {
+    "ucp": {
+        "version": "2026-01-11",
+        "capabilities": [{"name": "dev.ucp.shopping.order", "version": "2026-01-11"}],
+    },
+    "id": "order-abc-123",
+    "status": "complete",
+    "currency": "USD",
+    "totals": [
+        {"type": "subtotal", "amount": 3500},
+        {"type": "total", "amount": 3500},
+    ],
+    "fulfillment": {
+        "methods": [
+            {
+                "id": "ship_123",
+                "type": "shipping",
+                "status": "unfulfilled",
+                "selected_option_id": "standard",
+            }
+        ]
+    },
+}
+
+# Sample shipped order response
+SAMPLE_ORDER_SHIPPED = {
+    "ucp": {
+        "version": "2026-01-11",
+        "capabilities": [{"name": "dev.ucp.shopping.order", "version": "2026-01-11"}],
+    },
+    "id": "order-abc-123",
+    "status": "complete",
+    "currency": "USD",
+    "totals": [
+        {"type": "subtotal", "amount": 3500},
+        {"type": "total", "amount": 3500},
+    ],
+    "fulfillment": {
+        "methods": [
+            {
+                "id": "ship_123",
+                "type": "shipping",
+                "status": "shipped",
+                "selected_option_id": "standard",
+            }
+        ]
+    },
+}
+
 # Sample completed checkout response
 SAMPLE_CHECKOUT_COMPLETED = {
     "ucp": {
@@ -212,10 +262,34 @@ SAMPLE_CHECKOUT_COMPLETED = {
 }
 
 
+# Sample products response
+SAMPLE_PRODUCTS_RESPONSE = {
+    "products": [
+        {
+            "id": "bouquet_roses",
+            "title": "Bouquet of Red Roses",
+            "price": 3500,
+            "image_url": "http://localhost:8182/images/roses.jpg",
+        },
+        {
+            "id": "sunflower_bunch",
+            "title": "Sunflower Bunch",
+            "price": 2200,
+            "image_url": None,
+        },
+    ]
+}
+
+
 @pytest.fixture
 def mock_ucp_server():
     """Fixture that mocks UCP server responses."""
     with respx.mock(assert_all_called=False) as respx_mock:
+        # Products endpoint
+        respx_mock.get("http://localhost:8182/products").mock(
+            return_value=Response(200, json=SAMPLE_PRODUCTS_RESPONSE)
+        )
+
         # Discovery endpoint
         respx_mock.get("http://localhost:8182/.well-known/ucp").mock(
             return_value=Response(200, json=SAMPLE_DISCOVERY_RESPONSE)
@@ -240,6 +314,16 @@ def mock_ucp_server():
         respx_mock.post(
             url__regex=r"http://localhost:8182/checkout-sessions/.*/complete"
         ).mock(return_value=Response(200, json=SAMPLE_CHECKOUT_COMPLETED))
+
+        # Order endpoint
+        respx_mock.get(url__regex=r"http://localhost:8182/orders/.*").mock(
+            return_value=Response(200, json=SAMPLE_ORDER_RESPONSE)
+        )
+
+        # Simulate shipping endpoint
+        respx_mock.post(
+            url__regex=r"http://localhost:8182/testing/simulate-shipping/.*"
+        ).mock(return_value=Response(200, json={"status": "shipped"}))
 
         yield respx_mock
 

@@ -40,6 +40,8 @@ from ucp_mcp_server.server import (
     ucp_checkout_set_fulfillment,
     ucp_checkout_update,
     ucp_discover,
+    ucp_order_get,
+    ucp_testing_simulate_shipping,
 )
 
 
@@ -169,6 +171,110 @@ class TestIntegrationCheckout:
         print(f"Saved: ${(original_total - result['total']) / 100:.2f}")
 
 
+async def _create_completed_order(merchant_url: str) -> dict:
+    """Helper to create and complete a checkout, returning the completed result.
+
+    Creates a fresh checkout, applies a discount, sets up fulfillment, and
+    completes payment so that callers get a valid order_id for order tests.
+    """
+    checkout = await ucp_checkout_create(
+        merchant_url=merchant_url,
+        items=[{"id": "bouquet_roses", "quantity": 2}],
+        buyer_name="John Doe",
+        buyer_email="john.doe@example.com",
+    )
+    assert "error" not in checkout, f"Checkout error: {checkout.get('error')}"
+
+    updated = await ucp_checkout_update(
+        merchant_url=merchant_url,
+        checkout_id=checkout["checkout_id"],
+        discount_codes=["10OFF"],
+    )
+    assert "error" not in updated, f"Update error: {updated.get('error')}"
+
+    fulfillment = await ucp_checkout_set_fulfillment(
+        merchant_url=merchant_url,
+        checkout_id=checkout["checkout_id"],
+    )
+    assert "error" not in fulfillment, f"Fulfillment error: {fulfillment.get('error')}"
+
+    completed = await ucp_checkout_complete(
+        merchant_url=merchant_url,
+        checkout_id=checkout["checkout_id"],
+        payment_handler_id="mock_payment_handler",
+        card_token="success_token",
+    )
+    assert "error" not in completed, f"Complete error: {completed.get('error')}"
+    assert completed.get("order_id") is not None
+    return completed
+
+
+class TestIntegrationOrder:
+    """Integration tests for order tracking and shipping simulation."""
+
+    @pytest.mark.asyncio
+    async def test_get_order(self, integration_server_url, skip_if_no_server):
+        """Test retrieving order details after completing a purchase."""
+        completed = await _create_completed_order(integration_server_url)
+        order_id = completed["order_id"]
+
+        result = await ucp_order_get(
+            merchant_url=integration_server_url,
+            order_id=order_id,
+        )
+
+        assert "error" not in result, f"Got error: {result.get('error')}"
+        assert result["order_id"] == order_id
+        assert result.get("status")
+        assert "fulfillment" in result
+        print(f"\nOrder {order_id} status: {result['status']}")
+
+    @pytest.mark.asyncio
+    async def test_simulate_shipping(self, integration_server_url, skip_if_no_server):
+        """Test simulating shipping and verifying the order is marked shipped."""
+        completed = await _create_completed_order(integration_server_url)
+        order_id = completed["order_id"]
+
+        # Confirm the order is not marked as shipped before simulation
+        before = await ucp_order_get(
+            merchant_url=integration_server_url,
+            order_id=order_id,
+        )
+        assert "error" not in before, f"Got error: {before.get('error')}"
+        pre_ship_methods = before.get("fulfillment", {}).get("methods", [])
+        assert pre_ship_methods, (
+            "Expected fulfillment methods before simulating shipping"
+        )
+        assert not any(
+            method.get("status") == "shipped" for method in pre_ship_methods
+        ), "Order should not be shipped before simulation"
+
+        # Simulate shipping (testing endpoint provided by the sample merchant)
+        shipping_result = await ucp_testing_simulate_shipping(
+            merchant_url=integration_server_url,
+            order_id=order_id,
+        )
+        assert "error" not in shipping_result, (
+            f"Got error: {shipping_result.get('error')}"
+        )
+        assert shipping_result.get("status") == "shipped"
+        print(f"\nSimulate shipping result: {shipping_result}")
+
+        # Verify the order is now marked as shipped
+        after = await ucp_order_get(
+            merchant_url=integration_server_url,
+            order_id=order_id,
+        )
+        assert "error" not in after, f"Got error: {after.get('error')}"
+        post_ship_methods = after.get("fulfillment", {}).get("methods", [])
+        assert post_ship_methods, (
+            "Expected fulfillment methods after simulating shipping"
+        )
+        assert any(method.get("status") == "shipped" for method in post_ship_methods), (
+            "Expected at least one fulfillment method to be marked as shipped"
+        )
+
+
 class TestIntegrationFullFlow:
     """Integration test for complete shopping flow."""
 
@@ -176,7 +282,7 @@ class TestIntegrationFullFlow:
     async def test_complete_shopping_flow(
         self, integration_server_url, skip_if_no_server
     ):
-        """Test complete flow: discover -> checkout -> discount."""
+        """Test complete flow: discover -> checkout -> discount -> fulfillment -> payment."""
         # Step 1: Discover capabilities
         discovery = await ucp_discover(merchant_url=integration_server_url)
         assert "error" not in discovery
@@ -234,7 +340,7 @@ class TestIntegrationFullFlow:
             card_token="success_token",
         )
         assert "error" not in completed, f"Got error: {completed.get('error')}"
-        print("\n--- Step 4: Complete Checkout ---")
+        print("\n--- Step 5: Complete Checkout ---")
         print(f"Status: {completed['status']}")
         print(f"Order ID: {completed.get('order_id')}")
         print(f"Order URL: {completed.get('order_url')}")

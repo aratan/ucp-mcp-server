@@ -8,6 +8,7 @@ import httpx
 from .models import (
     CheckoutSession,
     PaymentHandler,
+    ProductListResponse,
     UCPCapability,
     UCPDiscoveryResponse,
 )
@@ -94,6 +95,26 @@ class UCPClient:
             capabilities=capabilities,
             payment_handlers=handlers,
         )
+
+    async def list_products(self, merchant_url: str) -> ProductListResponse:
+        """List products from a merchant's catalog."""
+        client = self._get_client()
+        url = f"{merchant_url.rstrip('/')}/products"
+
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+        except httpx.ConnectError as e:
+            raise UCPClientError(f"Could not connect to merchant: {e}")
+        except httpx.HTTPStatusError as e:
+            raise UCPClientError(
+                f"HTTP error from merchant: {e.response.status_code} - {e.response.text}"
+            )
+        except Exception as e:
+            raise UCPClientError(f"Error listing products: {e}")
+
+        return ProductListResponse(**data)
 
     async def create_checkout(
         self,
@@ -388,6 +409,58 @@ class UCPClient:
         }
         data = await self.raw_update_checkout(merchant_url, checkout_id, payload)
         return data
+
+    async def get_order(
+        self,
+        merchant_url: str,
+        order_id: str,
+    ) -> dict[str, Any]:
+        """Fetch an order by ID."""
+        client = self._get_client()
+        url = f"{merchant_url.rstrip('/')}/orders/{order_id}"
+        headers = {
+            "UCP-Agent": 'profile="https://ucp-mcp-server.example/profile"',
+            "request-signature": "test",
+            "request-id": str(uuid.uuid4()),
+        }
+        try:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except httpx.ConnectError as e:
+            raise UCPClientError(f"Could not connect to merchant: {e}")
+        except httpx.HTTPStatusError as e:
+            raise UCPClientError(
+                f"HTTP error from merchant: {e.response.status_code} - {e.response.text}"
+            )
+        except Exception as e:
+            raise UCPClientError(f"Error fetching order: {e}")
+
+    async def simulate_shipping(
+        self,
+        merchant_url: str,
+        order_id: str,
+    ) -> dict[str, Any]:
+        """Simulate shipping an order (merchant testing endpoint)."""
+        client = self._get_client()
+        url = f"{merchant_url.rstrip('/')}/testing/simulate-shipping/{order_id}"
+        headers = {
+            "UCP-Agent": 'profile="https://ucp-mcp-server.example/profile"',
+            "request-signature": "test",
+            "request-id": str(uuid.uuid4()),
+        }
+        try:
+            response = await client.post(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except httpx.ConnectError as e:
+            raise UCPClientError(f"Could not connect to merchant: {e}")
+        except httpx.HTTPStatusError as e:
+            raise UCPClientError(
+                f"HTTP error from merchant: {e.response.status_code} - {e.response.text}"
+            )
+        except Exception as e:
+            raise UCPClientError(f"Error simulating shipping: {e}")
 
     async def update_checkout(
         self,
