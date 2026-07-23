@@ -274,6 +274,147 @@ Returns:
 >
 > **Claude:** *calls ucp_checkout_create* "Added to cart! Checkout session created. Total: 1,850 EUR. Ready to complete purchase?"
 
+## Use Cases
+
+### 🛒 E-commerce Personal Assistant
+
+**Why:** Users want to shop naturally through conversation, not browse websites.
+
+**How:** The AI acts as a personal shopper that understands preferences and finds the best deals.
+
+```
+User: "I need a gift for my mom, she loves gardening, budget 50 euros"
+AI: ucp_products_search(query="garden", max_price=5000, sort_by="price_desc")
+AI: "I found 3 gardening items. The Premium Pruning Set at €45 has great reviews."
+User: "Perfect, buy it"
+AI: ucp_checkout_create → ucp_checkout_complete
+```
+
+**Value:** No app switching, no browser tabs, no remembering passwords. Just conversation.
+
+---
+
+### 🏢 Enterprise Procurement
+
+**Why:** Companies need to buy equipment across multiple vendors while tracking budgets.
+
+**How:** The AI compares products across merchants and follows procurement rules.
+
+```
+User: "We need 10 laptops for the dev team, under 1500 EUR each, from approved vendors"
+AI: ucp_products_search(category="laptop", max_price=150000, specs={"use_case": "development"})
+AI: "Found 5 options across 3 merchants. Best value: ThinkPad X1 at €1,299 from TechStore"
+User: "Add 10 to cart and apply our corporate discount CORP20"
+AI: ucp_checkout_create(quantity=10) → ucp_checkout_update(discount_codes=["CORP20"])
+```
+
+**Value:** Budget compliance, audit trail, no manual PO forms.
+
+---
+
+### 🔍 Price Comparison Shopping
+
+**Why:** Users want the best price without checking 10 different websites.
+
+**How:** The AI queries multiple UCP merchants and compares results.
+
+```
+User: "Find me the cheapest iPhone 15 Pro across all stores"
+AI: [queries 5 merchants simultaneously]
+AI: "Best price: €899 at TechShop (€50 cheaper than average). In stock in Madrid."
+User: "Buy it from there"
+AI: ucp_checkout_create(merchant_url="http://techshop.example.com")
+```
+
+**Value:** Save time and money without manual comparison.
+
+---
+
+### 🎁 Gift Purchasing with Constraints
+
+**Why:** Gift buying involves multiple constraints (budget, preferences, occasion).
+
+**How:** The AI filters products based on complex requirements.
+
+```
+User: "Find a red gaming PC under 2000 EUR for my son's birthday, needs RTX 4070 or better"
+AI: ucp_products_search(
+    color="red", category="pc", max_price=200000,
+    specs={"use_case": "gaming", "gpu_min": "RTX 4070"},
+    sort_by="price_asc"
+)
+AI: "Found 2 options. Best match: Gaming PC Rojo at €1,850 with RTX 4070 Ti"
+```
+
+**Value:** Complex multi-criteria search in one conversation.
+
+---
+
+### 📦 Order Tracking & Support
+
+**Why:** Users want to know where their order is without logging into websites.
+
+**How:** The AI tracks orders across merchants and provides updates.
+
+```
+User: "Where's my order from TechShop?"
+AI: ucp_order_get(order_id="order-abc-123")
+AI: "Your order shipped yesterday via DHL. Tracking: DH123456789. Expected delivery: Friday."
+User: "Can I change the delivery address?"
+AI: "Let me check... [calls merchant API] The order is already in transit, so address changes aren't possible. Would you like me to contact support?"
+```
+
+**Value:** Single point for all order tracking, no multiple logins.
+
+---
+
+### 🧪 Development & Testing
+
+**Why:** Developers need to test e-commerce integrations without real payments.
+
+**How:** Use the testing endpoints to simulate the full flow.
+
+```python
+# Full test flow without real money
+result = await ucp_testing_simulate_shipping(merchant_url, order_id)
+# Simulates: payment → fulfillment → shipping → delivery
+```
+
+**Value:** Test complete purchase flows in development environments.
+
+---
+
+### 🤖 Automated Reordering
+
+**Why:** Businesses need to reorder supplies when stock is low.
+
+**How:** The AI monitors inventory and triggers reorders automatically.
+
+```
+[Automated trigger: inventory low]
+AI: ucp_products_search(category="office_supplies", query="paper")
+AI: "Office paper running low. Reordering 50 reams from SuppliesCo at €25/ream"
+AI: ucp_checkout_create → ucp_checkout_complete
+```
+
+**Value:** Never run out of supplies, automatic procurement.
+
+---
+
+### 💳 Multi-Payment Method Support
+
+**Why:** Different users prefer different payment methods.
+
+**How:** The AI discovers and uses the user's preferred payment handler.
+
+```
+User: "Pay with Google Pay"
+AI: ucp_discover() → finds google_pay handler
+AI: ucp_checkout_complete(payment_handler_id="google_pay")
+```
+
+**Value:** Flexibility without merchant-side integration work.
+
 ## Why This Exists
 
 Every AI app is going to need shopping capabilities. UCP standardizes how merchants expose commerce APIs. MCP standardizes how AI assistants use tools. This project is the bridge.
@@ -287,6 +428,46 @@ With UCP + MCP:
 - One protocol, every merchant
 - Structured data in, structured data out
 - Works with any MCP-compatible AI assistant
+
+## Improvements Roadmap
+
+### 🔧 Optimization (Protocol-Compliant)
+
+| Area | Current | Improvement | Why |
+|------|---------|-------------|-----|
+| **HTTP Client** | New client per request | Connection pooling with `httpx.AsyncClient` reuse | Reduce latency, reuse TCP connections |
+| **Response Caching** | No caching | Cache `ucp_discover` results (5min TTL) | Discovery rarely changes, saves round-trips |
+| **Parallel Queries** | Sequential product search | `asyncio.gather()` for multi-merchant search | Search 5 merchants in time of 1 |
+| **Retry Logic** | No retries | Exponential backoff (3 attempts) | Handle transient network failures |
+| **Timeout Handling** | Default httpx timeout | Configurable per-tool timeouts (10s/30s/60s) | Prevent hanging on slow merchants |
+
+### 🛡️ Robustness (UCP Protocol Compliance)
+
+| Area | Current | Improvement | Why |
+|------|---------|-------------|-----|
+| **Error Messages** | Generic errors | UCP-compliant error codes + details | Merchants expect structured errors |
+| **Input Validation** | Basic Pydantic | Field-level validators (URL format, price ranges) | Fail fast with clear messages |
+| **Rate Limiting** | None | Client-side rate limiter (100 req/min) | Respect merchant limits |
+| **Graceful Degradation** | Fail on first error | Partial results with warnings | Show what works, note what failed |
+
+### 💻 Code Quality
+
+| Area | Current | Improvement | Why |
+|------|---------|-------------|-----|
+| **Type Hints** | Partial | Full typing with `py.typed` marker | Better IDE support, catch errors early |
+| **Docstrings** | Minimal | Google-style docstrings on all public APIs | Auto-generate API docs |
+| **Logging** | Print statements | Structured logging with `structlog` | Production observability |
+| **Config** | Hardcoded defaults | Environment-based config (`UCP_*` env vars) | Deploy anywhere without code changes |
+| **Metrics** | None | Prometheus metrics (request count, latency) | Monitor in production |
+
+### 🧪 Testing
+
+| Area | Current | Improvement | Why |
+|------|---------|-------------|-----|
+| **Mock Fidelity** | Static responses | Dynamic mocks from OpenAPI specs | Test against real merchant schemas |
+| **Property Tests** | None | Hypothesis-based property testing | Find edge cases automatically |
+| **Load Testing** | None | Locust scenarios for 100+ concurrent users | Verify production readiness |
+| **Contract Tests** | None | UCP protocol compliance suite | Guarantee merchant compatibility |
 
 ## Development
 
