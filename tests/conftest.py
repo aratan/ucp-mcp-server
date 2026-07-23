@@ -280,6 +280,108 @@ SAMPLE_PRODUCTS_RESPONSE = {
     ]
 }
 
+# Sample PC products for search testing
+SAMPLE_PC_PRODUCTS_RESPONSE = {
+    "products": [
+        {
+            "id": "pc-red-001",
+            "title": "PC Gaming Rojo Intel i7",
+            "price": 150000,
+            "image_url": "http://localhost:8182/images/pc-red-001.jpg",
+            "color": "red",
+            "category": "pc",
+            "location": "Madrid",
+            "specs": {
+                "cpu": "Intel i7-13700K",
+                "ram": "32GB",
+                "gpu": "RTX 4070",
+                "storage": "1TB SSD",
+                "use_case": "gaming",
+            },
+        },
+        {
+            "id": "pc-red-002",
+            "title": "PC Workstation Rojo AMD Ryzen 9",
+            "price": 280000,
+            "image_url": "http://localhost:8182/images/pc-red-002.jpg",
+            "color": "red",
+            "category": "pc",
+            "location": "Madrid",
+            "specs": {
+                "cpu": "AMD Ryzen 9 7950X",
+                "ram": "64GB",
+                "gpu": "RTX 4090",
+                "storage": "2TB SSD",
+                "use_case": "workstation",
+            },
+        },
+        {
+            "id": "pc-red-003",
+            "title": "PC IA Rojo NVIDIA H100",
+            "price": 185000,
+            "image_url": "http://localhost:8182/images/pc-red-003.jpg",
+            "color": "red",
+            "category": "pc",
+            "location": "Madrid",
+            "specs": {
+                "cpu": "AMD EPYC 9654",
+                "ram": "128GB",
+                "gpu": "NVIDIA H100",
+                "storage": "4TB SSD",
+                "use_case": "ai",
+            },
+        },
+        {
+            "id": "pc-blue-001",
+            "title": "PC Gaming Azul Intel i5",
+            "price": 120000,
+            "image_url": "http://localhost:8182/images/pc-blue-001.jpg",
+            "color": "blue",
+            "category": "pc",
+            "location": "Barcelona",
+            "specs": {
+                "cpu": "Intel i5-13600K",
+                "ram": "16GB",
+                "gpu": "RTX 4060",
+                "storage": "512GB SSD",
+                "use_case": "gaming",
+            },
+        },
+        {
+            "id": "pc-black-001",
+            "title": "PC Oficina Negro Intel i3",
+            "price": 80000,
+            "image_url": "http://localhost:8182/images/pc-black-001.jpg",
+            "color": "black",
+            "category": "pc",
+            "location": "Madrid",
+            "specs": {
+                "cpu": "Intel i3-13100",
+                "ram": "8GB",
+                "gpu": "Integrated",
+                "storage": "256GB SSD",
+                "use_case": "office",
+            },
+        },
+        {
+            "id": "laptop-red-001",
+            "title": "Portátil Rojo AMD para IA",
+            "price": 195000,
+            "image_url": "http://localhost:8182/images/laptop-red-001.jpg",
+            "color": "red",
+            "category": "laptop",
+            "location": "Madrid",
+            "specs": {
+                "cpu": "AMD Ryzen 9 7945HX",
+                "ram": "64GB",
+                "gpu": "RTX 4080",
+                "storage": "1TB SSD",
+                "use_case": "ai",
+            },
+        },
+    ]
+}
+
 
 @pytest.fixture
 def mock_ucp_server():
@@ -337,5 +439,50 @@ def mock_invalid_server():
         respx_mock.get("http://invalid.example/.well-known/ucp").mock(
             side_effect=httpx.ConnectError("Connection refused")
         )
+
+        yield respx_mock
+@pytest.fixture
+def mock_pc_store():
+    """Fixture that mocks a PC store with extended product data."""
+    with respx.mock(assert_all_called=False) as respx_mock:
+        # Products endpoint with PC catalog
+        respx_mock.get("http://localhost:8182/products").mock(
+            return_value=Response(200, json=SAMPLE_PC_PRODUCTS_RESPONSE)
+        )
+
+        # Discovery endpoint
+        respx_mock.get("http://localhost:8182/.well-known/ucp").mock(
+            return_value=Response(200, json=SAMPLE_DISCOVERY_RESPONSE)
+        )
+
+        # Create checkout endpoint
+        respx_mock.post("http://localhost:8182/checkout-sessions").mock(
+            return_value=Response(200, json=SAMPLE_CHECKOUT_RESPONSE)
+        )
+
+        # Get checkout endpoint
+        respx_mock.get(url__regex=r"http://localhost:8182/checkout-sessions/.*").mock(
+            return_value=Response(200, json=SAMPLE_CHECKOUT_RESPONSE)
+        )
+
+        # Update checkout endpoint
+        respx_mock.put(url__regex=r"http://localhost:8182/checkout-sessions/.*").mock(
+            return_value=Response(200, json=SAMPLE_CHECKOUT_WITH_DISCOUNT)
+        )
+
+        # Complete checkout endpoint
+        respx_mock.post(
+            url__regex=r"http://localhost:8182/checkout-sessions/.*/complete"
+        ).mock(return_value=Response(200, json=SAMPLE_CHECKOUT_COMPLETED))
+
+        # Order endpoint
+        respx_mock.get(url__regex=r"http://localhost:8182/orders/.*").mock(
+            return_value=Response(200, json=SAMPLE_ORDER_RESPONSE)
+        )
+
+        # Simulate shipping endpoint
+        respx_mock.post(
+            url__regex=r"http://localhost:8182/testing/simulate-shipping/.*"
+        ).mock(return_value=Response(200, json={"status": "shipped"}))
 
         yield respx_mock
