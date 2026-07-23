@@ -280,7 +280,10 @@ class UCPClient:
         current = await self.get_checkout(merchant_url, checkout_id)
 
         # Extract line item IDs from the current checkout
-        line_item_ids = [li.get("id") or li.get("item", {}).get("id") for li in current.get("line_items", [])]
+        line_item_ids = [
+            li.get("id") or li.get("item", {}).get("id")
+            for li in current.get("line_items", [])
+        ]
 
         base_payload = {
             "id": checkout_id,
@@ -290,9 +293,32 @@ class UCPClient:
         }
 
         method_id = str(uuid.uuid4())
+        dest_id = f"dest_{uuid.uuid4().hex[:8]}"
 
-        # Step 1: Trigger fulfillment generation
-        payload = {**base_payload, "fulfillment": {"methods": [{"id": method_id, "type": "shipping", "line_item_ids": line_item_ids}]}}
+        # Step 1: Trigger fulfillment generation with a default shipping address
+        # so the merchant can calculate shipping options.
+        payload = {
+            **base_payload,
+            "fulfillment": {
+                "methods": [
+                    {
+                        "id": method_id,
+                        "type": "shipping",
+                        "line_item_ids": line_item_ids,
+                        "destinations": [
+                            {
+                                "id": dest_id,
+                                "street_address": "123 Main St",
+                                "address_locality": "Anytown",
+                                "address_region": "CA",
+                                "address_country": "US",
+                                "postal_code": "12345",
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
         data = await self.raw_update_checkout(merchant_url, checkout_id, payload)
 
         # Step 2: Select first destination
@@ -313,7 +339,14 @@ class UCPClient:
             "line_items": data["line_items"],
             "payment": data["payment"],
             "fulfillment": {
-                "methods": [{"id": method_id, "type": "shipping", "line_item_ids": line_item_ids, "selected_destination_id": dest_id}]
+                "methods": [
+                    {
+                        "id": method_id,
+                        "type": "shipping",
+                        "line_item_ids": line_item_ids,
+                        "selected_destination_id": dest_id,
+                    }
+                ]
             },
         }
         data = await self.raw_update_checkout(merchant_url, checkout_id, payload)
@@ -342,7 +375,13 @@ class UCPClient:
                         "type": "shipping",
                         "line_item_ids": line_item_ids,
                         "selected_destination_id": dest_id,
-                        "groups": [{"id": group_id, "line_item_ids": line_item_ids, "selected_option_id": option_id}],
+                        "groups": [
+                            {
+                                "id": group_id,
+                                "line_item_ids": line_item_ids,
+                                "selected_option_id": option_id,
+                            }
+                        ],
                     }
                 ]
             },

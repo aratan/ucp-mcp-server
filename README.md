@@ -209,6 +209,25 @@ uv run pytest -v
 uv run pytest -v -m integration --run-integration
 ```
 
+### End-to-end functional tests
+
+The repository also ships with self-contained end-to-end scripts that start the sample UCP merchant and exercise the full shopping flow via the MCP stdio client.
+
+```bash
+# Run a single end-to-end flow against a freshly started sample merchant
+uv run python scripts/test_mcp_e2e.py
+
+# Run all built-in scenarios (single items, multiple items, discounts, out-of-stock, ...)
+uv run python scripts/test_mcp_scenarios.py
+
+# Use an already running merchant (e.g., on localhost:8182)
+uv run python scripts/test_mcp_e2e.py --skip-merchant
+uv run python scripts/test_mcp_scenarios.py --skip-merchant --merchant-url http://localhost:8182
+
+# Generate a sample scenarios file to customize
+uv run python scripts/test_mcp_scenarios.py --generate-sample scenarios.json
+```
+
 ### Project Structure
 
 ```

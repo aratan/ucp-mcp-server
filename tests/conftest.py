@@ -43,13 +43,22 @@ SAMPLE_DISCOVERY_RESPONSE = {
         },
         "capabilities": {
             "dev.ucp.shopping.checkout": [
-                {"version": "2026-04-08", "spec": "https://ucp.dev/specs/shopping/checkout"}
+                {
+                    "version": "2026-04-08",
+                    "spec": "https://ucp.dev/specs/shopping/checkout",
+                }
             ],
             "dev.ucp.shopping.discount": [
-                {"version": "2026-04-08", "spec": "https://ucp.dev/specs/shopping/discount"}
+                {
+                    "version": "2026-04-08",
+                    "spec": "https://ucp.dev/specs/shopping/discount",
+                }
             ],
             "dev.ucp.shopping.fulfillment": [
-                {"version": "2026-04-08", "spec": "https://ucp.dev/specs/shopping/fulfillment"}
+                {
+                    "version": "2026-04-08",
+                    "spec": "https://ucp.dev/specs/shopping/fulfillment",
+                }
             ],
         },
         "payment_handlers": {
