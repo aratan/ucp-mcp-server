@@ -41,6 +41,124 @@ async def ucp_products_list(merchant_url: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def ucp_products_search(
+    merchant_url: str,
+    query: str | None = None,
+    color: str | None = None,
+    category: str | None = None,
+    location: str | None = None,
+    max_price: int | None = None,
+    min_price: int | None = None,
+    sort_by: str | None = None,
+    specs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Search and filter products from a UCP merchant's catalog.
+
+    Args:
+        merchant_url: The base URL of the UCP-enabled merchant
+        query: Text search query to match against product titles
+        color: Filter by product color (e.g., 'red', 'blue', 'black')
+        category: Filter by product category (e.g., 'pc', 'laptop', 'monitor')
+        location: Filter by product location/availability (e.g., 'Madrid', 'Barcelona')
+        max_price: Maximum price filter in cents (e.g., 200000 for 2000 EUR)
+        min_price: Minimum price filter in cents
+        sort_by: Sort results by field ('price_asc', 'price_desc', 'name')
+        specs: Filter by product specifications (e.g., {'ram': '16GB', 'gpu': 'RTX 4090'})
+
+    Returns:
+        Dictionary containing:
+        - products: List of matching products
+        - total: Number of products found
+        - filters_applied: Summary of filters that were applied
+    """
+    try:
+        async with UCPClient() as client:
+            result = await client.list_products(merchant_url)
+            products = result.products
+
+            # Apply filters
+            filters_applied = {}
+
+            if query:
+                query_lower = query.lower()
+                products = [
+                    p for p in products
+                    if query_lower in p.title.lower()
+                ]
+                filters_applied["query"] = query
+
+            if color:
+                color_lower = color.lower()
+                products = [
+                    p for p in products
+                    if p.color and p.color.lower() == color_lower
+                ]
+                filters_applied["color"] = color
+
+            if category:
+                category_lower = category.lower()
+                products = [
+                    p for p in products
+                    if p.category and p.category.lower() == category_lower
+                ]
+                filters_applied["category"] = category
+
+            if location:
+                location_lower = location.lower()
+                products = [
+                    p for p in products
+                    if p.location and location_lower in p.location.lower()
+                ]
+                filters_applied["location"] = location
+
+            if max_price is not None:
+                products = [p for p in products if p.price <= max_price]
+                filters_applied["max_price"] = max_price
+
+            if min_price is not None:
+                products = [p for p in products if p.price >= min_price]
+                filters_applied["min_price"] = min_price
+
+            if specs:
+                for key, value in specs.items():
+                    value_lower = str(value).lower()
+                    products = [
+                        p for p in products
+                        if key in p.specs and str(p.specs[key]).lower() == value_lower
+                    ]
+                filters_applied["specs"] = specs
+
+            # Apply sorting
+            if sort_by == "price_asc":
+                products = sorted(products, key=lambda p: p.price)
+            elif sort_by == "price_desc":
+                products = sorted(products, key=lambda p: p.price, reverse=True)
+            elif sort_by == "name":
+                products = sorted(products, key=lambda p: p.title)
+
+            return {
+                "products": [
+                    {
+                        "id": p.id,
+                        "title": p.title,
+                        "price": p.price,
+                        "image_url": p.image_url,
+                        "color": p.color,
+                        "category": p.category,
+                        "location": p.location,
+                        "specs": p.specs,
+                    }
+                    for p in products
+                ],
+                "total": len(products),
+                "filters_applied": filters_applied,
+            }
+    except UCPClientError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def ucp_discover(merchant_url: str) -> dict[str, Any]:
     """
     Discover a merchant's UCP capabilities and supported payment methods.

@@ -123,12 +123,24 @@ class Product(BaseModel):
     title: str
     price: int
     image_url: str | None = None
+    color: str | None = None
+    category: str | None = None
+    location: str | None = None
+    specs: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProductListResponse(BaseModel):
     """Response from merchant's /products endpoint."""
 
     products: list[Product] = Field(default_factory=list)
+
+
+class ProductSearchResponse(BaseModel):
+    """Response from product search with filtering."""
+
+    products: list[Product] = Field(default_factory=list)
+    total: int = 0
+    filters_applied: dict[str, Any] = Field(default_factory=dict)
 
 
 # ============================================================================
