@@ -19,6 +19,8 @@
 | `ucp_checkout_update` | Apply discount codes to an existing checkout |
 | `ucp_checkout_set_fulfillment` | Set up shipping (auto-selects address and delivery option) |
 | `ucp_checkout_complete` | Complete the purchase by submitting payment |
+| `ucp_order_get` | Get the current status of an order, including fulfillment |
+| `ucp_testing_simulate_shipping` | Mark an order as shipped via the merchant's testing endpoint |
 
 Your AI assistant gets structured, type-safe access to the entire UCP shopping flow. No scraping, no browser automation, no brittle hacks.
 
@@ -164,6 +166,36 @@ Returns:
   order_url: Permalink to the order
 ```
 
+### `ucp_order_get`
+
+Get the current status of an order, including fulfillment details.
+
+```
+Arguments:
+  merchant_url (str): Base URL of the merchant
+  order_id (str): The order to track
+
+Returns:
+  order_id: The order ID
+  status: Current order status
+  currency: Order currency
+  total: Total amount charged
+  fulfillment: Fulfillment details (method, tracking, status)
+```
+
+### `ucp_testing_simulate_shipping`
+
+Simulate shipping an order via the merchant's testing endpoint. Useful for end-to-end tests and demos.
+
+```
+Arguments:
+  merchant_url (str): Base URL of the merchant
+  order_id (str): The order to mark as shipped
+
+Returns:
+  status: The result of the simulation (e.g., "shipped")
+```
+
 ## Example Conversation
 
 > **You:** "Find out what the flower shop at http://flowers.example.com supports"
@@ -242,6 +274,7 @@ ucp-mcp-server/
     ├── conftest.py         # Test fixtures with mock UCP responses
     ├── test_discovery.py   # Discovery tool tests
     ├── test_checkout.py    # Checkout tool tests
+    ├── test_order.py       # Order tracking tool tests
     ├── test_errors.py      # Error handling tests
     └── test_integration.py # Live server integration tests
 ```
@@ -263,6 +296,8 @@ flowchart LR
         B4[ucp_checkout_update]
         B5[ucp_checkout_set_fulfillment]
         B6[ucp_checkout_complete]
+        B7[ucp_order_get]
+        B8[ucp_testing_simulate_shipping]
     end
 
     subgraph Client["HTTP Client Layer"]
@@ -284,8 +319,8 @@ flowchart LR
     end
 
     A1 -->|"MCP Protocol (stdio)"| B1
-    B1 --> B2 & B3 & B4 & B5 & B6
-    B2 & B3 & B4 & B5 & B6 --> C1
+    B1 --> B2 & B3 & B4 & B5 & B6 & B7 & B8
+    B2 & B3 & B4 & B5 & B6 & B7 & B8 --> C1
     C1 --> C2
     C2 -->|"HTTPS"| E1 & E2 & E3
     C1 --> D1 & D2 & D3 & D4
@@ -445,6 +480,15 @@ sequenceDiagram
     Client-->>MCP: OrderInfo
     MCP-->>AI: order_id, order_url
     AI-->>User: "Order placed! 🎉"
+
+    User->>AI: "Has my order shipped?"
+    AI->>MCP: ucp_order_get(order_id)
+    MCP->>Client: get_order()
+    Client->>Merchant: GET /orders/:id
+    Merchant-->>Client: Order + fulfillment status
+    Client-->>MCP: Order details
+    MCP-->>AI: status, fulfillment
+    AI-->>User: "Your order is still being prepared"
 ```
 
 ## Roadmap
@@ -456,10 +500,10 @@ sequenceDiagram
 - [x] Discount code application (`ucp_checkout_update`)
 - [x] Fulfillment / shipping setup (`ucp_checkout_set_fulfillment`)
 - [x] Purchase completion / payment submission (`ucp_checkout_complete`)
+- [x] Order fulfillment tracking (`ucp_order_get`, `ucp_testing_simulate_shipping`)
 
 ### 🚧 In Progress
 
-- [ ] Order fulfillment tracking
 - [ ] Returns and exchanges
 
 ### 📋 Planned

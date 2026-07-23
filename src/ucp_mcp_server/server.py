@@ -11,6 +11,36 @@ mcp = FastMCP("ucp-shopping")
 
 
 @mcp.tool()
+async def ucp_products_list(merchant_url: str) -> dict[str, Any]:
+    """
+    List available products from a UCP merchant's catalog.
+
+    Args:
+        merchant_url: The base URL of the UCP-enabled merchant
+
+    Returns:
+        Dictionary containing:
+        - products: List of products with id, title, price, and image_url
+    """
+    try:
+        async with UCPClient() as client:
+            result = await client.list_products(merchant_url)
+            return {
+                "products": [
+                    {
+                        "id": p.id,
+                        "title": p.title,
+                        "price": p.price,
+                        "image_url": p.image_url,
+                    }
+                    for p in result.products
+                ]
+            }
+    except UCPClientError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def ucp_discover(merchant_url: str) -> dict[str, Any]:
     """
     Discover a merchant's UCP capabilities and supported payment methods.

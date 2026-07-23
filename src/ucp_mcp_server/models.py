@@ -112,6 +112,26 @@ class CheckoutSession(BaseModel):
 
 
 # ============================================================================
+# Product Catalog Models
+# ============================================================================
+
+
+class Product(BaseModel):
+    """A product in a merchant's catalog."""
+
+    id: str
+    title: str
+    price: int
+    image_url: str | None = None
+
+
+class ProductListResponse(BaseModel):
+    """Response from merchant's /products endpoint."""
+
+    products: list[Product] = Field(default_factory=list)
+
+
+# ============================================================================
 # Request Models (for MCP tool inputs)
 # ============================================================================
 

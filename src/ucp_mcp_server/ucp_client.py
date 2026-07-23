@@ -8,6 +8,7 @@ import httpx
 from .models import (
     CheckoutSession,
     PaymentHandler,
+    ProductListResponse,
     UCPCapability,
     UCPDiscoveryResponse,
 )
@@ -94,6 +95,26 @@ class UCPClient:
             capabilities=capabilities,
             payment_handlers=handlers,
         )
+
+    async def list_products(self, merchant_url: str) -> ProductListResponse:
+        """List products from a merchant's catalog."""
+        client = self._get_client()
+        url = f"{merchant_url.rstrip('/')}/products"
+
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+        except httpx.ConnectError as e:
+            raise UCPClientError(f"Could not connect to merchant: {e}")
+        except httpx.HTTPStatusError as e:
+            raise UCPClientError(
+                f"HTTP error from merchant: {e.response.status_code} - {e.response.text}"
+            )
+        except Exception as e:
+            raise UCPClientError(f"Error listing products: {e}")
+
+        return ProductListResponse(**data)
 
     async def create_checkout(
         self,

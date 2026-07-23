@@ -262,10 +262,34 @@ SAMPLE_CHECKOUT_COMPLETED = {
 }
 
 
+# Sample products response
+SAMPLE_PRODUCTS_RESPONSE = {
+    "products": [
+        {
+            "id": "bouquet_roses",
+            "title": "Bouquet of Red Roses",
+            "price": 3500,
+            "image_url": "http://localhost:8182/images/roses.jpg",
+        },
+        {
+            "id": "sunflower_bunch",
+            "title": "Sunflower Bunch",
+            "price": 2200,
+            "image_url": None,
+        },
+    ]
+}
+
+
 @pytest.fixture
 def mock_ucp_server():
     """Fixture that mocks UCP server responses."""
     with respx.mock(assert_all_called=False) as respx_mock:
+        # Products endpoint
+        respx_mock.get("http://localhost:8182/products").mock(
+            return_value=Response(200, json=SAMPLE_PRODUCTS_RESPONSE)
+        )
+
         # Discovery endpoint
         respx_mock.get("http://localhost:8182/.well-known/ucp").mock(
             return_value=Response(200, json=SAMPLE_DISCOVERY_RESPONSE)
