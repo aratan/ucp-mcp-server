@@ -433,8 +433,8 @@ With UCP + MCP:
 
 ### 🔧 Optimization (Protocol-Compliant)
 
-| Area | Current | Improvement | Why |
-|------|---------|-------------|-----|
+| Area | Before | After | Why |
+|------|--------|-------|-----|
 | **HTTP Client** | New client per request | Connection pooling with `httpx.AsyncClient` reuse | Reduce latency, reuse TCP connections |
 | **Response Caching** | No caching | Cache `ucp_discover` results (5min TTL) | Discovery rarely changes, saves round-trips |
 | **Parallel Queries** | Sequential product search | `asyncio.gather()` for multi-merchant search | Search 5 merchants in time of 1 |
@@ -468,6 +468,31 @@ With UCP + MCP:
 | **Property Tests** | None | Hypothesis-based property testing | Find edge cases automatically |
 | **Load Testing** | None | Locust scenarios for 100+ concurrent users | Verify production readiness |
 | **Contract Tests** | None | UCP protocol compliance suite | Guarantee merchant compatibility |
+
+## Configuration
+
+All settings are configurable via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `UCP_TIMEOUT` | `30.0` | HTTP request timeout in seconds |
+| `UCP_CONNECT_TIMEOUT` | `10.0` | Connection timeout in seconds |
+| `UCP_MAX_CONCURRENT` | `10` | Max concurrent HTTP connections |
+| `UCP_RATE_LIMIT` | `100` | Max requests per second to merchants |
+| `UCP_MAX_RETRIES` | `3` | Max retry attempts on failure |
+| `UCP_RETRY_BACKOFF_BASE` | `0.5` | Base backoff time in seconds |
+| `UCP_RETRY_BACKOFF_MAX` | `10.0` | Max backoff time in seconds |
+| `UCP_DISCOVERY_CACHE_TTL` | `300` | Discovery cache TTL in seconds |
+| `UCP_LOG_LEVEL` | `INFO` | Logging level |
+
+### Example: Production Configuration
+
+```bash
+export UCP_TIMEOUT=60
+export UCP_RATE_LIMIT=50
+export UCP_MAX_RETRIES=5
+export UCP_LOG_LEVEL=WARNING
+```
 
 ## Development
 
