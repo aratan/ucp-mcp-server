@@ -15,6 +15,8 @@
 | Tool | Description |
 |------|-------------|
 | `ucp_discover` | Find out what a merchant supports (capabilities, payment methods) |
+| `ucp_products_list` | List all products from a merchant's catalog |
+| `ucp_products_search` | Search and filter products by color, category, location, price, specs |
 | `ucp_checkout_create` | Start a purchase (add items to cart, set buyer info) |
 | `ucp_checkout_update` | Apply discount codes to an existing checkout |
 | `ucp_checkout_set_fulfillment` | Set up shipping (auto-selects address and delivery option) |
@@ -90,6 +92,55 @@ Returns:
   capabilities: List of supported UCP capabilities (checkout, discount, fulfillment)
   payment_handlers: Accepted payment methods (Shop Pay, Google Pay, etc.)
   ucp_version: Protocol version the merchant implements
+```
+
+### `ucp_products_list`
+
+List all products from a merchant's catalog.
+
+```
+Arguments:
+  merchant_url (str): Base URL of the merchant
+
+Returns:
+  products: List of products with id, title, price, and image_url
+```
+
+### `ucp_products_search`
+
+Search and filter products from a merchant's catalog with advanced filtering.
+
+```
+Arguments:
+  merchant_url (str): Base URL of the merchant
+  query (str): Text search query to match against product titles
+  color (str): Filter by color (e.g., "red", "blue", "black")
+  category (str): Filter by category (e.g., "pc", "laptop", "monitor")
+  location (str): Filter by location/availability (e.g., "Madrid", "Barcelona")
+  max_price (int): Maximum price filter in cents (e.g., 200000 for 2000 EUR)
+  min_price (int): Minimum price filter in cents
+  sort_by (str): Sort results by "price_asc", "price_desc", or "name"
+  specs (dict): Filter by specifications (e.g., {"use_case": "ai", "gpu": "RTX 4090"})
+
+Returns:
+  products: List of matching products with all fields
+  total: Number of products found
+  filters_applied: Summary of filters that were applied
+```
+
+**Example: Find a red PC for AI in Madrid under 2000 EUR**
+
+```python
+result = await ucp_products_search(
+    merchant_url="http://localhost:8182",
+    color="red",
+    category="pc",
+    location="Madrid",
+    max_price=200000,  # 2000 EUR in cents
+    specs={"use_case": "ai"},
+    sort_by="price_asc",
+)
+# Returns: PC IA Rojo NVIDIA H100 at 1850 EUR
 ```
 
 ### `ucp_checkout_create`
@@ -198,6 +249,8 @@ Returns:
 
 ## Example Conversation
 
+### Basic Shopping Flow
+
 > **You:** "Find out what the flower shop at http://flowers.example.com supports"
 >
 > **Claude:** *calls ucp_discover* "This merchant supports checkout, discounts, and fulfillment tracking. They accept Shop Pay and Google Pay."
@@ -209,6 +262,17 @@ Returns:
 > **You:** "Try the code 10OFF first"
 >
 > **Claude:** *calls ucp_checkout_update* "Applied 10OFF - saved $7.00! New total: $63.00."
+
+### Product Search Flow
+
+> **You:** "I'm looking for a red PC for AI work in Madrid, budget under 2000 EUR"
+>
+> **Claude:** *calls ucp_products_search(color="red", category="pc", location="Madrid", max_price=200000, specs={"use_case": "ai"}, sort_by="price_asc")*
+> "I found 1 matching PC: **PC IA Rojo NVIDIA H100** at **1,850 EUR**. It has 128GB RAM, AMD EPYC 9654 CPU, and NVIDIA H100 GPU. This is the cheapest option that meets your criteria. Would you like to proceed with checkout?"
+>
+> **You:** "Yes, add it to cart"
+>
+> **Claude:** *calls ucp_checkout_create* "Added to cart! Checkout session created. Total: 1,850 EUR. Ready to complete purchase?"
 
 ## Why This Exists
 
@@ -273,9 +337,12 @@ ucp-mcp-server/
 └── tests/
     ├── conftest.py         # Test fixtures with mock UCP responses
     ├── test_discovery.py   # Discovery tool tests
+    ├── test_products.py    # Product listing tests
+    ├── test_product_search.py # Product search/filter tests
     ├── test_checkout.py    # Checkout tool tests
     ├── test_order.py       # Order tracking tool tests
     ├── test_errors.py      # Error handling tests
+    ├── test_e2e_user_journey.py # End-to-end user journey tests
     └── test_integration.py # Live server integration tests
 ```
 
@@ -292,12 +359,14 @@ flowchart LR
     subgraph MCP["MCP Server Layer"]
         B1[FastMCP Server]
         B2[ucp_discover]
-        B3[ucp_checkout_create]
-        B4[ucp_checkout_update]
-        B5[ucp_checkout_set_fulfillment]
-        B6[ucp_checkout_complete]
-        B7[ucp_order_get]
-        B8[ucp_testing_simulate_shipping]
+        B3[ucp_products_list]
+        B4[ucp_products_search]
+        B5[ucp_checkout_create]
+        B6[ucp_checkout_update]
+        B7[ucp_checkout_set_fulfillment]
+        B8[ucp_checkout_complete]
+        B9[ucp_order_get]
+        B10[ucp_testing_simulate_shipping]
     end
 
     subgraph Client["HTTP Client Layer"]
@@ -319,8 +388,8 @@ flowchart LR
     end
 
     A1 -->|"MCP Protocol (stdio)"| B1
-    B1 --> B2 & B3 & B4 & B5 & B6 & B7 & B8
-    B2 & B3 & B4 & B5 & B6 & B7 & B8 --> C1
+    B1 --> B2 & B3 & B4 & B5 & B6 & B7 & B8 & B9 & B10
+    B2 & B3 & B4 & B5 & B6 & B7 & B8 & B9 & B10 --> C1
     C1 --> C2
     C2 -->|"HTTPS"| E1 & E2 & E3
     C1 --> D1 & D2 & D3 & D4
@@ -496,11 +565,15 @@ sequenceDiagram
 ### ✅ Completed
 
 - [x] Merchant capability discovery (`ucp_discover`)
+- [x] Product catalog listing (`ucp_products_list`)
+- [x] Product search and filtering (`ucp_products_search`)
 - [x] Checkout session creation (`ucp_checkout_create`)
 - [x] Discount code application (`ucp_checkout_update`)
 - [x] Fulfillment / shipping setup (`ucp_checkout_set_fulfillment`)
 - [x] Purchase completion / payment submission (`ucp_checkout_complete`)
 - [x] Order fulfillment tracking (`ucp_order_get`, `ucp_testing_simulate_shipping`)
+- [x] End-to-end user journey tests
+- [x] UCP protocol compliance tests
 
 ### 🚧 In Progress
 
