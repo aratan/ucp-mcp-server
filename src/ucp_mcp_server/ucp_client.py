@@ -1,10 +1,14 @@
-"""HTTP client for UCP API calls."""
+"""HTTP client for UCP API calls with rate limiting, retry, and structured logging."""
 
+import asyncio
+import logging
+import time
 import uuid
 from typing import Any
 
 import httpx
 
+from .config import config
 from .models import (
     CheckoutSession,
     PaymentHandler,
@@ -13,6 +17,8 @@ from .models import (
     UCPDiscoveryResponse,
 )
 
+logger = logging.getLogger("ucp_mcp_server")
+
 
 class UCPClientError(Exception):
     """Error from UCP client operations."""
@@ -20,15 +26,79 @@ class UCPClientError(Exception):
     pass
 
 
-class UCPClient:
-    """Async HTTP client for UCP merchant APIs."""
+class RateLimiter:
+    """Token bucket rate limiter for async operations."""
 
-    def __init__(self, timeout: float = 30.0):
-        self.timeout = timeout
+    def __init__(self, max_per_second: float = 100):
+        self._max_per_second = max_per_second
+        self._tokens = max_per_second
+        self._last_refill = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        """Acquire a rate limit token, waiting if necessary."""
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_refill
+            self._tokens = min(self._max_per_second, self._tokens + elapsed * self._max_per_second)
+            self._last_refill = now
+
+            if self._tokens < 1:
+                wait_time = (1 - self._tokens) / self._max_per_second
+                logger.debug(f"Rate limit: waiting {wait_time:.3f}s")
+                await asyncio.sleep(wait_time)
+                self._tokens = 0
+            else:
+                self._tokens -= 1
+
+
+class DiscoveryCache:
+    """Simple TTL cache for discovery responses."""
+
+    def __init__(self, ttl: int = 300):
+        self._cache: dict[str, tuple[float, Any]] = {}
+        self._ttl = ttl
+
+    def get(self, merchant_url: str) -> Any | None:
+        """Get cached discovery response if valid."""
+        if merchant_url in self._cache:
+            timestamp, data = self._cache[merchant_url]
+            if time.time() - timestamp < self._ttl:
+                logger.debug(f"Discovery cache hit: {merchant_url}")
+                return data
+            del self._cache[merchant_url]
+        return None
+
+    def set(self, merchant_url: str, data: Any) -> None:
+        """Cache a discovery response."""
+        self._cache[merchant_url] = (time.time(), data)
+
+
+# Global instances
+_rate_limiter = RateLimiter(config.RATE_LIMIT_PER_SECOND)
+_discovery_cache = DiscoveryCache(config.DISCOVERY_CACHE_TTL)
+
+
+class UCPClient:
+    """Async HTTP client for UCP merchant APIs with rate limiting and retry."""
+
+    def __init__(
+        self,
+        timeout: float | None = None,
+        max_retries: int | None = None,
+    ):
+        self.timeout = timeout or config.TIMEOUT
+        self.max_retries = max_retries or config.MAX_RETRIES
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "UCPClient":
-        self._client = httpx.AsyncClient(timeout=self.timeout)
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(self.timeout, connect=config.CONNECT_TIMEOUT),
+            limits=httpx.Limits(
+                max_connections=config.MAX_CONCURRENT_REQUESTS,
+                max_keepalive_connections=config.MAX_CONCURRENT_REQUESTS // 2,
+            ),
+        )
         return self
 
     async def __aexit__(self, *args) -> None:
@@ -41,14 +111,64 @@ class UCPClient:
             raise UCPClientError("Client not initialized. Use async context manager.")
         return self._client
 
+    async def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        **kwargs,
+    ) -> httpx.Response:
+        """Execute HTTP request with retry and exponential backoff."""
+        last_error = None
+
+        for attempt in range(self.max_retries + 1):
+            await _rate_limiter.acquire()
+
+            try:
+                client = self._get_client()
+                response = await client.request(method, url, **kwargs)
+
+                # Don't retry on 4xx errors (client errors)
+                if 400 <= response.status_code < 500:
+                    response.raise_for_status()
+
+                # Retry on 5xx errors
+                if response.status_code >= 500:
+                    raise httpx.HTTPStatusError(
+                        f"Server error: {response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
+
+                return response
+
+            except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    backoff = min(
+                        config.RETRY_BACKOFF_BASE * (2 ** attempt),
+                        config.RETRY_BACKOFF_MAX,
+                    )
+                    logger.warning(
+                        f"Request failed (attempt {attempt + 1}/{self.max_retries + 1}), "
+                        f"retrying in {backoff:.1f}s: {e}"
+                    )
+                    await asyncio.sleep(backoff)
+                else:
+                    logger.error(f"Request failed after {self.max_retries + 1} attempts: {e}")
+
+        raise last_error
+
     async def discover(self, merchant_url: str) -> UCPDiscoveryResponse:
-        """Discover merchant UCP capabilities."""
-        client = self._get_client()
+        """Discover merchant UCP capabilities with caching."""
+        # Check cache first
+        cached = _discovery_cache.get(merchant_url)
+        if cached is not None:
+            return cached
+
         url = f"{merchant_url.rstrip('/')}/.well-known/ucp"
 
         try:
-            response = await client.get(url)
-            response.raise_for_status()
+            response = await self._request_with_retry("GET", url)
             data = response.json()
         except httpx.ConnectError as e:
             raise UCPClientError(f"Could not connect to merchant: {e}")
@@ -90,20 +210,23 @@ class UCPClient:
                     )
                 )
 
-        return UCPDiscoveryResponse(
+        result = UCPDiscoveryResponse(
             version=ucp_data.get("version", "unknown"),
             capabilities=capabilities,
             payment_handlers=handlers,
         )
 
+        # Cache the result
+        _discovery_cache.set(merchant_url, result)
+
+        return result
+
     async def list_products(self, merchant_url: str) -> ProductListResponse:
         """List products from a merchant's catalog."""
-        client = self._get_client()
         url = f"{merchant_url.rstrip('/')}/products"
 
         try:
-            response = await client.get(url)
-            response.raise_for_status()
+            response = await self._request_with_retry("GET", url)
             data = response.json()
         except httpx.ConnectError as e:
             raise UCPClientError(f"Could not connect to merchant: {e}")
@@ -125,7 +248,6 @@ class UCPClient:
         payment_handlers: list[dict] | None = None,
     ) -> CheckoutSession:
         """Create a new checkout session."""
-        client = self._get_client()
         url = f"{merchant_url.rstrip('/')}/checkout-sessions"
 
         # Build line items
@@ -159,8 +281,7 @@ class UCPClient:
         }
 
         try:
-            response = await client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
+            response = await self._request_with_retry("POST", url, json=payload, headers=headers)
             data = response.json()
         except httpx.ConnectError as e:
             raise UCPClientError(f"Could not connect to merchant: {e}")
@@ -183,7 +304,6 @@ class UCPClient:
         card_last_digits: str = "4242",
     ) -> CheckoutSession:
         """Complete a checkout session by submitting payment."""
-        client = self._get_client()
         url = f"{merchant_url.rstrip('/')}/checkout-sessions/{checkout_id}/complete"
 
         payload = {
@@ -222,8 +342,7 @@ class UCPClient:
         }
 
         try:
-            response = await client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
+            response = await self._request_with_retry("POST", url, json=payload, headers=headers)
             data = response.json()
         except httpx.ConnectError as e:
             raise UCPClientError(f"Could not connect to merchant: {e}")
@@ -242,7 +361,6 @@ class UCPClient:
         checkout_id: str,
     ) -> dict[str, Any]:
         """Fetch current checkout state."""
-        client = self._get_client()
         url = f"{merchant_url.rstrip('/')}/checkout-sessions/{checkout_id}"
         headers = {
             "UCP-Agent": 'profile="https://ucp-mcp-server.example/profile"',
@@ -250,8 +368,7 @@ class UCPClient:
             "request-id": str(uuid.uuid4()),
         }
         try:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
+            response = await self._request_with_retry("GET", url, headers=headers)
             return response.json()
         except httpx.ConnectError as e:
             raise UCPClientError(f"Could not connect to merchant: {e}")
@@ -269,7 +386,6 @@ class UCPClient:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         """Send a raw update payload to a checkout session."""
-        client = self._get_client()
         url = f"{merchant_url.rstrip('/')}/checkout-sessions/{checkout_id}"
         headers = {
             "Content-Type": "application/json",
@@ -279,8 +395,7 @@ class UCPClient:
             "request-id": str(uuid.uuid4()),
         }
         try:
-            response = await client.put(url, json=payload, headers=headers)
-            response.raise_for_status()
+            response = await self._request_with_retry("PUT", url, json=payload, headers=headers)
             return response.json()
         except httpx.ConnectError as e:
             raise UCPClientError(f"Could not connect to merchant: {e}")
@@ -416,7 +531,6 @@ class UCPClient:
         order_id: str,
     ) -> dict[str, Any]:
         """Fetch an order by ID."""
-        client = self._get_client()
         url = f"{merchant_url.rstrip('/')}/orders/{order_id}"
         headers = {
             "UCP-Agent": 'profile="https://ucp-mcp-server.example/profile"',
@@ -424,8 +538,7 @@ class UCPClient:
             "request-id": str(uuid.uuid4()),
         }
         try:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
+            response = await self._request_with_retry("GET", url, headers=headers)
             return response.json()
         except httpx.ConnectError as e:
             raise UCPClientError(f"Could not connect to merchant: {e}")
@@ -442,7 +555,6 @@ class UCPClient:
         order_id: str,
     ) -> dict[str, Any]:
         """Simulate shipping an order (merchant testing endpoint)."""
-        client = self._get_client()
         url = f"{merchant_url.rstrip('/')}/testing/simulate-shipping/{order_id}"
         headers = {
             "UCP-Agent": 'profile="https://ucp-mcp-server.example/profile"',
@@ -450,8 +562,7 @@ class UCPClient:
             "request-id": str(uuid.uuid4()),
         }
         try:
-            response = await client.post(url, headers=headers)
-            response.raise_for_status()
+            response = await self._request_with_retry("POST", url, headers=headers)
             return response.json()
         except httpx.ConnectError as e:
             raise UCPClientError(f"Could not connect to merchant: {e}")
@@ -470,7 +581,6 @@ class UCPClient:
         line_items: list[dict] | None = None,
     ) -> CheckoutSession:
         """Update an existing checkout session."""
-        client = self._get_client()
         url = f"{merchant_url.rstrip('/')}/checkout-sessions/{checkout_id}"
 
         # First, fetch the current checkout state so we can send required fields
@@ -480,8 +590,7 @@ class UCPClient:
             "request-id": str(uuid.uuid4()),
         }
         try:
-            get_response = await client.get(url, headers=get_headers)
-            get_response.raise_for_status()
+            get_response = await self._request_with_retry("GET", url, headers=get_headers)
             current = get_response.json()
         except Exception:
             # If we can't fetch, build a minimal payload
@@ -510,8 +619,7 @@ class UCPClient:
         }
 
         try:
-            response = await client.put(url, json=payload, headers=headers)
-            response.raise_for_status()
+            response = await self._request_with_retry("PUT", url, json=payload, headers=headers)
             data = response.json()
         except httpx.ConnectError as e:
             raise UCPClientError(f"Could not connect to merchant: {e}")
