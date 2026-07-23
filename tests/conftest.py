@@ -4,6 +4,16 @@ import pytest
 import respx
 from httpx import Response
 
+from ucp_mcp_server.ucp_client import _discovery_cache
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+    """Clear discovery cache before each test."""
+    _discovery_cache._cache.clear()
+    yield
+    _discovery_cache._cache.clear()
+
 
 def pytest_addoption(parser):
     """Add command line option to run integration tests."""
